@@ -11,8 +11,8 @@ Paste a natural-language invoice → AI extracts structured payment details → 
 | Service | URL |
 |---|---|
 | **Frontend** | [https://smartpay-demo-5sc.pages.dev](https://smartpay-demo-5sc.pages.dev) |
-| **Backend API** | [https://smartpay-api.smartpay-demo.workers.dev](https://smartpay-api.smartpay-demo.workers.dev) |
-| **Health Check** | [https://smartpay-api.smartpay-demo.workers.dev/health](https://smartpay-api.smartpay-demo.workers.dev/health) |
+| **Backend API** | [https://smartpay-api.seedwordai.workers.dev](https://smartpay-api.seedwordai.workers.dev) |
+| **Health Check** | [https://smartpay-api.seedwordai.workers.dev/health](https://smartpay-api.seedwordai.workers.dev/health) |
 
 ---
 
@@ -137,14 +137,14 @@ npm run deploy
 ```bash
 cd frontend
 npm install
-VITE_API_URL=https://smartpay-api.smartpay-demo.workers.dev npm run build
+VITE_API_URL=https://smartpay-api.seedwordai.workers.dev npm run build
 npx wrangler pages deploy dist --project-name=smartpay-demo
 ```
 
 ### 8. Verify
 
 ```bash
-curl https://smartpay-api.smartpay-demo.workers.dev/health
+curl https://smartpay-api.seedwordai.workers.dev/health
 ```
 
 ---
