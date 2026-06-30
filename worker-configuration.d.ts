@@ -82,7 +82,7 @@ type AiInputs = {
 }
 
 interface Env {
-  DB: D1Database
+  DB?: D1Database  // Optional — uses in-memory fallback when D1 is not bound
   KV: KVNamespace
   R2?: R2Bucket
   AI: Ai

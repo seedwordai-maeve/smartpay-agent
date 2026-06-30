@@ -16,6 +16,7 @@ export const invoices = new Hono<{ Bindings: Env }>();
  */
 invoices.post("/", async (c) => {
   const env = c.env;
+  const conn = env.DB!;  // injected by middleware (real D1 or memdb fallback)
   const contentType = c.req.header("content-type") ?? "";
 
   let submitter: string | null = null;
@@ -32,7 +33,6 @@ invoices.post("/", async (c) => {
       await env.R2.put(r2Key, await file.arrayBuffer(), {
         httpMetadata: { "content-type": file.type || "application/octet-stream" },
       });
-      // For text-based files (txt, pdf→text later), stash content for extraction
       if (file.type.startsWith("text/")) {
         text = await file.text();
       }
@@ -46,27 +46,23 @@ invoices.post("/", async (c) => {
   if (!submitter) throw Errors.missingField("submitter", "submitter field is required");
   if (!text && !r2Key) throw Errors.missingField("input", "Provide either a file= or text= field");
 
-  // Rate limit (5/min per IP) using KV counter
   await enforceRateLimit(env, c.req.header("cf-connecting-ip") ?? "anon");
 
   const id = ulid("inv_");
-  const invoice = await db.createInvoice(env.DB, {
+  const invoice = await db.createInvoice(conn, {
     id,
     submitter,
     raw_r2_key: r2Key,
     raw_text: text,
   });
 
-  // Eagerly run extraction if we already have text. PDF/image OCR fallback
-  // would be a phase-2 Queue job; for the POC we extract synchronously.
   if (text) {
     try {
       const extracted = await extractInvoice(env.AI, env.AI_MODEL, text);
-      await db.setStatus(env.DB, id, "pending_approval", {
+      await db.setStatus(conn, id, "pending_approval", {
         extracted_json: JSON.stringify(extracted),
       });
 
-      // Validate payee wallet on-ledger
       let validation: InvoiceValidation = { wallet_exists: false, trustline_present: false, warnings: [] };
       try {
         validation = await withClient(env, (client) =>
@@ -75,23 +71,22 @@ invoices.post("/", async (c) => {
       } catch (e) {
         validation.warnings.push(`XRPL validation lookup failed: ${(e as Error).message}`);
       }
-      await db.setStatus(env.DB, id, "pending_approval", {
+      await db.setStatus(conn, id, "pending_approval", {
         validation_json: JSON.stringify(validation),
       });
 
       if (!validation.wallet_exists || !validation.trustline_present) {
-        await db.setStatus(env.DB, id, "needs_review");
+        await db.setStatus(conn, id, "needs_review");
       }
-      await db.appendAudit(env.DB, { invoice_id: id, event: "extracted", payload: { extracted, validation } });
+      await db.appendAudit(conn, { invoice_id: id, event: "extracted", payload: { extracted, validation } });
     } catch (e) {
       const detail = e instanceof HttpError ? (e.problem.detail ?? e.message) : (e instanceof Error ? e.message : String(e));
-      await db.setStatus(env.DB, id, "failed", { xrpl_code: "extraction_failed" });
-      await db.appendAudit(env.DB, { invoice_id: id, event: "extraction_failed", payload: { detail } });
-      // Non-fatal to the POST — invoice is created, client can poll status
+      await db.setStatus(conn, id, "failed", { xrpl_code: "extraction_failed" });
+      await db.appendAudit(conn, { invoice_id: id, event: "extraction_failed", payload: { detail } });
     }
   }
 
-  const updated = await db.getInvoice(env.DB, id);
+  const updated = await db.getInvoice(conn, id);
   return c.json(
     {
       id: invoice.id,
@@ -107,7 +102,8 @@ invoices.post("/", async (c) => {
 /** GET /v1/invoices/:id — fetch invoice + extracted fields */
 invoices.get("/:id", async (c) => {
   const id = c.req.param("id");
-  const row = await db.getInvoice(c.env.DB, id);
+  const conn = c.env.DB!;
+  const row = await db.getInvoice(conn, id);
   if (!row) throw Errors.notFound(id);
 
   const extracted = row.extracted_json ? (JSON.parse(row.extracted_json) as ExtractedInvoice) : null;
@@ -132,7 +128,8 @@ invoices.get("/:id", async (c) => {
 /** GET /v1/invoices/:id/events — SSE status stream */
 invoices.get("/:id/events", async (c) => {
   const id = c.req.param("id");
-  const exists = await db.getInvoice(c.env.DB, id);
+  const conn = c.env.DB!;
+  const exists = await db.getInvoice(conn, id);
   if (!exists) throw Errors.notFound(id);
 
   const stream = new ReadableStream({
@@ -145,10 +142,10 @@ invoices.get("/:id/events", async (c) => {
       let lastStatus = "";
       const pollIntervalMs = Number(c.env.SETTLE_POLL_INTERVAL_MS) || 2000;
       const timeoutMs = Number(c.env.SETTLE_POLL_TIMEOUT_MS) || 30000;
-      const deadline = Date.now() + timeoutMs + 60_000; // grace period
+      const deadline = Date.now() + timeoutMs + 60_000;
 
       while (Date.now() < deadline) {
-        const row = await db.getInvoice(c.env.DB, id);
+        const row = await db.getInvoice(conn, id);
         if (!row) {
           send("error", { error: "invoice deleted" });
           break;
@@ -164,7 +161,6 @@ invoices.get("/:id/events", async (c) => {
             xrpl_code: row.xrpl_code,
           });
         }
-        // Terminal states
         if (["settled", "rejected", "failed"].includes(row.status)) break;
         await new Promise((r) => setTimeout(r, pollIntervalMs));
       }
@@ -184,8 +180,9 @@ invoices.get("/:id/events", async (c) => {
 /** POST /v1/invoices/:id/approve — human approval gate → settlement */
 invoices.post("/:id/approve", async (c) => {
   const env = c.env;
+  const conn = env.DB!;
   const id = c.req.param("id");
-  const row = await db.getInvoice(env.DB, id);
+  const row = await db.getInvoice(conn, id);
   if (!row) throw Errors.notFound(id);
 
   if (!["pending_approval", "needs_review"].includes(row.status)) {
@@ -199,15 +196,13 @@ invoices.post("/:id/approve", async (c) => {
   const approver = (body.approver as string)?.trim();
   if (!approver) throw Errors.missingField("approver", "approver field is required");
 
-  // Apply human edits if provided
   const amount = (body.edited_amount as string)?.trim() || extracted.amount;
   const destination = (body.edited_wallet as string)?.trim() || extracted.payee_wallet;
 
-  await db.setStatus(env.DB, id, "approved", { approver });
-  await db.appendAudit(env.DB, { invoice_id: id, event: "approved", payload: { approver, amount, destination }, actor: approver });
+  await db.setStatus(conn, id, "approved", { approver });
+  await db.appendAudit(conn, { invoice_id: id, event: "approved", payload: { approver, amount, destination }, actor: approver });
 
-  // Transition to signing — submit the payment
-  await db.setStatus(env.DB, id, "signing");
+  await db.setStatus(conn, id, "signing");
 
   const wallet = getAgentWallet(env);
   let finality;
@@ -225,10 +220,8 @@ invoices.post("/:id/approve", async (c) => {
   } catch (e) {
     const err = e as HttpError;
     const xrplCode = err.problem.xrpl_code ?? "submit_failed";
-    await db.setStatus(env.DB, id, "failed", {
-      xrpl_code: xrplCode,
-    });
-    await db.appendAudit(env.DB, {
+    await db.setStatus(conn, id, "failed", { xrpl_code: xrplCode });
+    await db.appendAudit(conn, {
       invoice_id: id,
       event: "submit_failed",
       payload: { detail: err.message, xrpl_code: xrplCode },
@@ -237,12 +230,12 @@ invoices.post("/:id/approve", async (c) => {
     throw e;
   }
 
-  await db.setStatus(env.DB, id, "settled", {
+  await db.setStatus(conn, id, "settled", {
     tx_hash: finality.tx_hash,
     tx_sequence: finality.sequence,
     ledger_index: finality.ledger_index,
   });
-  await db.appendAudit(env.DB, {
+  await db.appendAudit(conn, {
     invoice_id: id,
     event: "settled",
     payload: finality,
@@ -265,8 +258,9 @@ invoices.post("/:id/approve", async (c) => {
 /** POST /v1/invoices/:id/reject — reject with reason */
 invoices.post("/:id/reject", async (c) => {
   const env = c.env;
+  const conn = env.DB!;
   const id = c.req.param("id");
-  const row = await db.getInvoice(env.DB, id);
+  const row = await db.getInvoice(conn, id);
   if (!row) throw Errors.notFound(id);
   if (!["pending_approval", "needs_review"].includes(row.status)) {
     throw Errors.invalidState(id, row.status, ["pending_approval", "needs_review"]);
@@ -277,11 +271,11 @@ invoices.post("/:id/reject", async (c) => {
   const reason = (body.reason as string)?.trim() ?? "no reason given";
   if (!approver) throw Errors.missingField("approver", "approver field is required");
 
-  await db.setStatus(env.DB, id, "rejected", {
+  await db.setStatus(conn, id, "rejected", {
     approver,
     reject_reason: reason,
   });
-  await db.appendAudit(env.DB, {
+  await db.appendAudit(conn, {
     invoice_id: id,
     event: "rejected",
     payload: { reason },
@@ -291,12 +285,12 @@ invoices.post("/:id/reject", async (c) => {
   return c.json({ id, status: "rejected", reason });
 });
 
-/** GET /v1/audit — mounted in worker.ts at /v1/audit. See auditList above. */
 /** Shared audit list handler (mounted in worker.ts at /v1/audit). */
 export async function auditList(c: { env: Env; req: { query: (k: string) => string | undefined } }) {
+  const conn = c.env.DB!;
   const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
   const cursor = c.req.query("cursor") ?? undefined;
-  const { items, next_cursor } = await db.listInvoices(c.env.DB, limit, cursor);
+  const { items, next_cursor } = await db.listInvoices(conn, limit, cursor);
   return Response.json({
     items: items.map((r) => ({
       id: r.id,

@@ -10,7 +10,7 @@ Paste a natural-language invoice → AI extracts structured payment details → 
 
 | Service | URL |
 |---|---|
-| **Frontend** | [https://smartpay-demo.pages.dev](https://smartpay-demo.pages.dev) |
+| **Frontend** | [https://smartpay-demo-5sc.pages.dev](https://smartpay-demo-5sc.pages.dev) |
 | **Backend API** | [https://smartpay-api.smartpay-demo.workers.dev](https://smartpay-api.smartpay-demo.workers.dev) |
 | **Health Check** | [https://smartpay-api.smartpay-demo.workers.dev/health](https://smartpay-api.smartpay-demo.workers.dev/health) |
 

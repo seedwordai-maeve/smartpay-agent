@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // Production backend Worker URL. Set VITE_API_URL env var to override.
-const apiUrl = process.env.VITE_API_URL || 'https://smartpay-api.smartpay-demo.workers.dev'
+const apiUrl = process.env.VITE_API_URL || 'https://smartpay-api.seedwordai.workers.dev'
 
 export default defineConfig({
   plugins: [react()],

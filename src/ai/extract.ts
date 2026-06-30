@@ -57,7 +57,6 @@ export async function extractInvoice(
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: trimmed },
       ],
-      response_format: { type: "json_schema" },
       temperature: 0,
       max_tokens: 1024,
     });

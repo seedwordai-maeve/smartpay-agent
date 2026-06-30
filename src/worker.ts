@@ -6,17 +6,27 @@ import { invoices, auditList } from "./routes/invoices";
 import { wallet } from "./routes/wallet";
 import { HttpError } from "./lib/errors";
 import type { ProblemDetails } from "./types";
+import { createMemDB } from "./lib/memdb";
 
 const app = new Hono<{ Bindings: Env }>();
 
 // ── Middleware ─────────────────────────────────────────────────────────────
+// Inject in-memory D1 fallback when no real D1 binding is present
+app.use("*", async (c, next) => {
+  if (!c.env.DB) {
+    (c.env as unknown as Record<string, unknown>).DB = createMemDB();
+  }
+  await next();
+});
+
 app.use("*", logger());
 app.use("*", cors({
   origin: [
     "http://localhost:4321",
     "http://localhost:8788",
     "https://smartpay-demo.pages.dev",
-    "https://*.smartpay-demo.pages.dev",
+    "https://smartpay-demo-5sc.pages.dev",
+    "https://*.smartpay-demo-5sc.pages.dev",
   ],
   allowMethods: ["GET", "POST", "OPTIONS"],
   allowHeaders: ["Content-Type", "Authorization"],
