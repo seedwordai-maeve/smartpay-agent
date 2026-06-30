@@ -1,0 +1,44 @@
+name = "smartpay-api"
+main = "src/worker.ts"
+compatibility_date = "2025-09-15"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Observability ──────────────────────────────────────────────────────────
+[observability]
+enabled = true
+
+# ── D1: invoices + audit_log ───────────────────────────────────────────────
+[[d1_databases]]
+binding = "DB"
+database_name = "smartpay"
+database_id = "07818a86-2547-43ea-a106-008a05f1ba11"
+
+# ── KV: sessions, rate-limit counters, idempotency keys ────────────────────
+[[kv_namespaces]]
+binding = "KV"
+id = "09fb512467bd4f06bfaa46bde2589f61"
+
+# ── R2: raw invoice uploads (optional — text-based invoices work without R2) ──
+# [[r2_buckets]]
+# binding = "R2"
+# bucket_name = "smartpay-uploads"
+
+# ── Workers AI binding ─────────────────────────────────────────────────────
+[ai]
+binding = "AI"
+
+# ── Non-secret configuration ───────────────────────────────────────────────
+[vars]
+XRPL_NETWORK = "testnet"
+XRPL_WSS = "wss://s.altnet.rippletest.net:51233"
+XRPL_FAUCET = "https://faucet.altnet.rippletest.net"
+# RLUSD issuer on Testnet — verify before mainnet swap.
+RLUSD_ISSUER = "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De"
+AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+RATE_LIMIT_PER_MIN = "5"
+SETTLE_POLL_INTERVAL_MS = "2000"
+SETTLE_POLL_TIMEOUT_MS = "30000"
+
+# Secrets (set via `wrangler secret put <NAME>`):
+#   AGENT_WALLET_SEED   – XRPL Testnet wallet seed (fund via faucet)
+#   AI_GATEWAY_URL      – optional AI Gateway endpoint

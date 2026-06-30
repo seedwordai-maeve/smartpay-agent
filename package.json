@@ -1,0 +1,32 @@
+{
+  "name": "smartpay-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SmartPay Agent — autonomous invoice settlement on XRPL Testnet via Cloudflare Workers",
+  "main": "src/worker.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply smartpay --local",
+    "db:migrate:remote": "wrangler d1 migrations apply smartpay --remote",
+    "setup:wallet": "tsx scripts/generate-wallet.ts",
+    "setup:trustline": "tsx scripts/setup-trustline.ts",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.36.4",
+    "hono": "^4.6.14",
+    "xrpl": "^4.2.4"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.40",
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "wrangler": "^4.105.0"
+  }
+}

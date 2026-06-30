@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-ink-950 text-slate-200 font-sans antialiased;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(26, 127, 255, 0.15), transparent),
+      radial-gradient(ellipse 60% 40% at 80% 100%, rgba(35, 213, 181, 0.08), transparent);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-ink-900/70 backdrop-blur-xl border border-white/[0.06] rounded-2xl;
+  }
+  .glass-hover {
+    @apply transition-colors hover:border-white/[0.12];
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
+           bg-gradient-to-b from-accent-500 to-accent-600 text-white
+           shadow-[0_1px_0_0_rgba(255,255,255,0.2)_inset,0_8px_24px_-8px_rgba(26,127,255,0.6)]
+           hover:from-accent-400 hover:to-accent-500 active:scale-[0.98]
+           transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm
+           bg-white/[0.04] border border-white/[0.08] text-slate-300
+           hover:bg-white/[0.07] hover:text-white active:scale-[0.98]
+           transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm
+           bg-red-500/10 border border-red-500/20 text-red-300
+           hover:bg-red-500/15 hover:border-red-500/30 active:scale-[0.98]
+           transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .input-field {
+    @apply w-full bg-ink-850 border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-slate-100
+           placeholder:text-slate-500 outline-none transition-colors
+           focus:border-accent-500/50 focus:ring-2 focus:ring-accent-500/20;
+  }
+  .label {
+    @apply block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5;
+  }
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold;
+  }
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
