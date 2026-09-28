@@ -54,10 +54,16 @@ Paste a natural-language invoice → AI extracts structured payment details → 
 | **Frontend** | React 18 · TypeScript · Vite 6 · Tailwind CSS 3 → Cloudflare Pages |
 | **Backend** | Hono → Cloudflare Workers (`nodejs_compat`) |
 | **AI** | Cloudflare Workers AI — `@cf/meta/llama-3.1-8b-instruct` (JSON mode) |
-| **Database** | Cloudflare D1 (SQLite) |
+| **Database** | Cloudflare D1 (SQLite) fallback to KV |
 | **Cache / Rate-limit** | Cloudflare KV |
 | **Blockchain** | XRPL Testnet via `xrpl.js` (Wallet only) + raw JSON-RPC for reliability |
 | **Protocol** | REST + Server-Sent Events (SSE) for live status updates |
+
+---
+
+## State Layer (KV Fallback)
+
+Until the production Cloudflare API token is granted the required D1 permissions, the application state layer is backed by Cloudflare KV (`src/lib/kvdb.ts`) instead of the ephemeral `memdb`. This provides cross-isolate persistence for the demo to avoid the `invoice_not_found` flaky 404s on approval. Note that KV's eventual consistency means there is a theoretical read-modify-write race condition under concurrent modification of the same invoice, which is acceptable for this single-user demo. To verify persistence, you can run `./scripts/verify-e2e.sh` twice consecutively; both runs should reach `settled` status.
 
 ---
 

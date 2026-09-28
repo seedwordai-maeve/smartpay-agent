@@ -7,6 +7,7 @@ import { wallet } from "./routes/wallet";
 import { HttpError } from "./lib/errors";
 import type { ProblemDetails } from "./types";
 import { createMemDB } from "./lib/memdb";
+import { createKvDB } from "./lib/kvdb";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -14,7 +15,11 @@ const app = new Hono<{ Bindings: Env }>();
 // Inject in-memory D1 fallback when no real D1 binding is present
 app.use("*", async (c, next) => {
   if (!c.env.DB) {
-    (c.env as unknown as Record<string, unknown>).DB = createMemDB();
+    if (c.env.KV) {
+      (c.env as unknown as Record<string, unknown>).DB = createKvDB(c.env.KV);
+    } else {
+      (c.env as unknown as Record<string, unknown>).DB = createMemDB();
+    }
   }
   await next();
 });
