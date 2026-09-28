@@ -68,7 +68,7 @@ export default function InvoiceInput({ onSubmitted }: Props) {
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={`e.g.\n\nInvoice INV-2026-0417\nFrom: Acme Suppliers Ltd\nAmount: $1,250.00\nPay to: rD8sEimQjrmzqXryQYsbqzLGw3Y9X3yF1Y\nDue: 2026-07-15\nSettle in XRP`}
+          placeholder={`e.g.\n\nInvoice INV-2026-0417\nFrom: Acme Suppliers Ltd\nAmount: 0.01 XRP\nPay to: rGpcR1kRfuJ6igha1HP4wsWeE2ZrMsVu8c\nDue: 2026-07-15\nSettle in XRP`}
           rows={9}
           className="input-field font-mono text-xs resize-y leading-relaxed"
           disabled={loading}

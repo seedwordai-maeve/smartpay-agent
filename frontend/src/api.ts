@@ -135,16 +135,16 @@ Date: 2026-06-28
 Due: 2026-07-15
 
 Description                          Qty   Unit      Total
-API infrastructure (enterprise)        1   $1,000.00 $1,000.00
-Priority support add-on                1   $250.00    $250.00
+API infrastructure (demo)            1   0.006 XRP  0.006 XRP
+Priority support add-on              1   0.004 XRP  0.004 XRP
 
-Total due: $1,250.00 USD
-Payment address: rD8sEimQjrmzqXryQYsbqzLGw3Y9X3yF1Y
+Total due: 0.01 XRP
+Payment address: rGpcR1kRfuJ6igha1HP4wsWeE2ZrMsVu8c
 Settle in XRP on XRPL.`,
   },
   {
     label: 'Short payment instruction',
-    text: `Pay 85 XRP to rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De for Globex Hosting monthly invoice #GH-7723. Due 2026-07-10.`,
+    text: `Pay 0.01 XRP to rGpcR1kRfuJ6igha1HP4wsWeE2ZrMsVu8c for Globex Hosting monthly invoice #GH-7723. Due 2026-07-10.`,
   },
   {
     label: 'Multi-line vendor invoice',
@@ -153,11 +153,11 @@ Invoice: CDY-2026-093
 Date: 2026-06-30
 Net 30 — due 2026-07-30
 
-GPU compute cluster (monthly)    1 x $4,500.00 = $4,500.00
-Model fine-tuning service        1 x $900.00   = $900.00
+GPU compute cluster (demo, prorated)   1 x 0.008 XRP = 0.008 XRP
+Model fine-tuning service (demo)       1 x 0.002 XRP = 0.002 XRP
 
-Amount due: $5,400.00 USD
-Pay to XRPL wallet: rLfWQbcyQmFhXKhzVq7dWk3KgYkS8sJ6Y
+Amount due: 0.01 XRP
+Pay to XRPL wallet: rGpcR1kRfuJ6igha1HP4wsWeE2ZrMsVu8c
 Currency: XRP`,
   },
 ]

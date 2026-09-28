@@ -17,7 +17,7 @@ fi
 echo "Health check passed."
 
 echo "2. Submitting invoice..."
-TEXT="Pay 0.5 XRP to rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De for E2E test invoice #$(date +%s). Due 2026-07-10."
+TEXT="Pay 0.01 XRP to rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De for E2E test invoice #$(date +%s). Due 2026-07-10."
 RES=$(curl -s -X POST "$API_URL/v1/invoices" -H "Content-Type: application/json" -d "{\"text\": \"$TEXT\", \"submitter\": \"e2e-script\"}")
 
 ID=$(echo "$RES" | jq -r '.id // empty')
