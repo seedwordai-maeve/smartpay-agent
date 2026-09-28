@@ -235,12 +235,25 @@ export default function InvoiceReview({ invoice, onSettling, onApprove, onReject
         </span>
       </div>
 
+      {invoice.validation && !invoice.validation.wallet_exists && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-500/[0.07] border border-red-500/15 mb-4">
+          <AlertTriangle width={16} height={16} className="text-red-400 flex-shrink-0" />
+          <span className="text-xs text-red-200">
+            Cannot approve: Invalid payee wallet address.
+          </span>
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="flex flex-col sm:flex-row gap-3">
         <button
           onClick={handleApprove}
-          disabled={approving}
-          className="btn-primary flex-1 h-12"
+          disabled={approving || (invoice.validation && !invoice.validation.wallet_exists)}
+          className={`flex-1 h-12 flex items-center justify-center gap-2 font-medium text-sm rounded-xl transition-all ${
+            approving || (invoice.validation && !invoice.validation.wallet_exists)
+              ? 'bg-ink-800 text-slate-500 cursor-not-allowed border border-white/[0.02]'
+              : 'btn-primary'
+          }`}
         >
           {approving ? (
             <>

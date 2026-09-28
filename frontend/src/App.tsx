@@ -41,14 +41,14 @@ export default function App() {
     ])
     streamCancelled.current = false
 
-    // Begin the mock SSE settlement stream
+    // Begin the SSE settlement stream
     streamSettlement((e) => {
       if (streamCancelled.current) return
       setEvents((prev) => [...prev, e])
       setCurrentStatus(e.status)
       if (e.tx_final) setTxFinal(e.tx_final)
       if (e.error) setSetError(e.error)
-    }).catch(() => {
+    }, { invoiceId: _invoice.id }).catch(() => {
       if (!streamCancelled.current) {
         setSetError('Stream interrupted unexpectedly.')
         setCurrentStatus('failed')
