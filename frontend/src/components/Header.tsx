@@ -38,8 +38,7 @@ export default function Header() {
                 </div>
                 <div className="w-px h-3 bg-white/[0.08]" />
                 <div>
-                  <span className="text-slate-500">RLUSD</span>{' '}
-                  <span className="font-semibold text-ripple-400 font-mono">{bal.rlusd_balance}</span>
+                  <span className="text-slate-500 text-[10px]">XRP only</span>
                 </div>
               </div>
             </div>

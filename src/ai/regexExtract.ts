@@ -8,24 +8,40 @@ export function fallbackRegexExtract(text: string): ExtractedInvoice | null {
   }
 
   const amountPatterns = [
-    /\$\s?([\d,]+\.?\d*)\s*(?:USD|RLUSD|USDT|USDC)/i,
-    /(?:total\s*(?:due|amount)[:\s]*)\$?\s?([\d,]+\.?\d*)/i,
-    /(?:amount\s*(?:due|owing)[:\s]*)\$?\s?([\d,]+\.?\d*)/i,
-    /(?:pay|send|transfer)\s+(\d+(?:\.\d+)?)\s*(XRP|RLUSD|USD)/i,
+    // explicit currency
+    /(?:pay|send|transfer)\s+([\d,]+\.?\d*)\s*(XRP|RLUSD|USD|USDT|USDC|EUR)/i,
+    /(?:amount|total)[\s:]*([\d,]+\.?\d*)\s*(XRP|RLUSD|USD|USDT|USDC|EUR)/i,
+    /([\d,]+\.?\d*)\s*(XRP|RLUSD|USD|USDT|USDC|EUR)/i,
+    // explicit dollar sign -> USD
+    /\$\s?([\d,]+\.?\d*)/i,
+    // bare numbers
+    /(?:total\s*(?:due|amount)?[:\s]*)\$?\s?([\d,]+\.?\d*)/i,
+    /(?:amount\s*(?:due|owing)?[:\s]*)\$?\s?([\d,]+\.?\d*)/i,
+    /(?:pay|send|transfer)\s+([\d,]+\.?\d*)/i,
   ];
 
   let amount = "0";
-  let currency: "RLUSD" | "XRP" = "RLUSD";
+  let currency = "UNKNOWN";
   
   for (const p of amountPatterns) {
     const m = text.match(p);
     if (m) {
       amount = m[1].replace(/,/g, "");
-      if (m[2] && m[2].toUpperCase() === "XRP") {
-        currency = "XRP";
+      if (m[2]) {
+        currency = m[2].toUpperCase();
+      } else if (m[0].includes("$")) {
+        currency = "USD";
       }
       break;
     }
+  }
+
+  let extraction_warnings: string[] = [];
+  let confidence = 0.5;
+  if (currency === "UNKNOWN") {
+    currency = "XRP";
+    confidence = 0.3; // penalty
+    extraction_warnings.push("currency not stated — assumed XRP");
   }
 
   // If no amount was found, we still return what we have (needs_review state)
@@ -36,6 +52,7 @@ export function fallbackRegexExtract(text: string): ExtractedInvoice | null {
   const dueMatch = text.match(/(?:due[:\s]*)(\d{4}-\d{2}-\d{2})/i);
 
   return {
+    extraction_warnings,
     payee_name: nameMatch?.[1]?.trim(),
     payee_wallet: addrMatch[1],
     amount,
@@ -43,6 +60,6 @@ export function fallbackRegexExtract(text: string): ExtractedInvoice | null {
     due_date: dueMatch?.[1],
     invoice_number: invMatch?.[1],
     line_items: [],
-    confidence: 0.5,
+    confidence,
   };
 }

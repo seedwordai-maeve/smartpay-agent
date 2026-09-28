@@ -140,11 +140,11 @@ Priority support add-on                1   $250.00    $250.00
 
 Total due: $1,250.00 USD
 Payment address: rD8sEimQjrmzqXryQYsbqzLGw3Y9X3yF1Y
-Settle in RLUSD on XRPL.`,
+Settle in XRP on XRPL.`,
   },
   {
     label: 'Short payment instruction',
-    text: `Pay 85 RLUSD to rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De for Globex Hosting monthly invoice #GH-7723. Due 2026-07-10.`,
+    text: `Pay 85 XRP to rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De for Globex Hosting monthly invoice #GH-7723. Due 2026-07-10.`,
   },
   {
     label: 'Multi-line vendor invoice',
@@ -158,6 +158,6 @@ Model fine-tuning service        1 x $900.00   = $900.00
 
 Amount due: $5,400.00 USD
 Pay to XRPL wallet: rLfWQbcyQmFhXKhzVq7dWk3KgYkS8sJ6Y
-Currency: RLUSD`,
+Currency: XRP`,
   },
 ]

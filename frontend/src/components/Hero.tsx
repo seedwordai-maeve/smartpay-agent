@@ -19,7 +19,7 @@ export default function Hero({ onGetStarted }: { onGetStarted: () => void }) {
 
         <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed mb-10 animate-slide-up">
           Paste a natural-language invoice. The agent reads it, extracts the payment instruction,
-          asks for your approval, and settles in RLUSD on the XRPL — with a full on-ledger audit trail.
+          asks for your approval, and settles in XRP on the XRPL — with a full on-ledger audit trail.
         </p>
 
         <div className="flex flex-wrap items-center justify-center gap-3 mb-14 animate-slide-up">
@@ -53,7 +53,7 @@ export default function Hero({ onGetStarted }: { onGetStarted: () => void }) {
             {
               icon: Zap,
               title: '3–5s finality',
-              desc: 'Settles in RLUSD on XRPL Testnet with deterministic finality and audit Memos.',
+              desc: 'Settles in XRP on XRPL Testnet with deterministic finality and audit Memos.',
             },
           ].map((f) => (
             <div

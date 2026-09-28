@@ -112,7 +112,7 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
           payee_name: "Acme Suppliers Ltd",
           payee_wallet: "rjBKmWHnWCfpdoztKoh9xFqZbvzP2eZXWz",
           amount: "1250.00",
-          currency: "RLUSD",
+          currency: "XRP",
           due_date: "2026-07-15",
           invoice_number: "INV-2026-0417",
           line_items: [],
@@ -157,7 +157,7 @@ describe("SmartPay Agent API", () => {
       "/v1/invoices",
       {
         method: "POST",
-        body: JSON.stringify({ submitter: "alice@example.com", text: "Invoice INV-2026-0417 from Acme, pay rD8s... 1250 RLUSD, due 2026-07-15" }),
+        body: JSON.stringify({ submitter: "alice@example.com", text: "Invoice INV-2026-0417 from Acme, pay rD8s... 1250 XRP, due 2026-07-15" }),
         headers: { "content-type": "application/json" },
       },
       env,
@@ -173,7 +173,7 @@ describe("SmartPay Agent API", () => {
     const extracted = JSON.parse(row?.extracted_json ?? "{}");
     expect(extracted.payee_wallet).toMatch(/^r[1-9A-HJ-NP-Za-km-z]{24,}$/);
     expect(extracted.amount).toBe("1250.00");
-    expect(extracted.currency).toBe("RLUSD");
+    expect(extracted.currency).toBe("XRP");
   });
 
   it("returns 404 problem+json for unknown invoice", async () => {
@@ -188,7 +188,7 @@ describe("SmartPay Agent API", () => {
     const env = makeEnv({ AGENT_WALLET_SEED: undefined });
     // Seed an invoice in pending_approval directly
     await db.createInvoice(env.DB, { id: "inv_SEED1", submitter: "alice@example.com", raw_r2_key: null, raw_text: "..." });
-    const extracted = { payee_wallet: "rjBKmWHnWCfpdoztKoh9xFqZbvzP2eZXWz", amount: "10.00", currency: "RLUSD" as const, confidence: 0.9, line_items: [] };
+    const extracted = { payee_wallet: "rjBKmWHnWCfpdoztKoh9xFqZbvzP2eZXWz", amount: "10.00", currency: "XRP" as const, confidence: 0.9, line_items: [] };
     await db.setStatus(env.DB, "inv_SEED1", "pending_approval", { extracted_json: JSON.stringify(extracted) });
 
     const res = await app.request(
@@ -208,8 +208,8 @@ describe("SmartPay Agent API", () => {
     const extracted = {
       payee_name: "Acme",
       payee_wallet: "rjBKmWHnWCfpdoztKoh9xFqZbvzP2eZXWz",
-      amount: "1250.00",
-      currency: "RLUSD" as const,
+      amount: "50.00",
+      currency: "XRP" as const,
       due_date: "2026-07-15",
       confidence: 0.94,
       line_items: [],
@@ -252,27 +252,40 @@ describe("SmartPay Agent API", () => {
     expect(body.type).toContain("invalid_payee");
   });
 
-  it("maps settle errors (e.g. tecUNFUNDED_PAYMENT) to clean problem responses", async () => {
+  it("enforces insufficient funds guard during approval (integer safety)", async () => {
     const env = makeEnv();
-    await db.createInvoice(env.DB, { id: "inv_SETTLE_FAIL", submitter: "alice@example.com", raw_r2_key: null, raw_text: "..." });
-    const extracted = { payee_wallet: "rValid", amount: "10.00", currency: "RLUSD", confidence: 1 };
-    await db.setStatus(env.DB, "inv_SETTLE_FAIL", "pending_approval", { extracted_json: JSON.stringify(extracted) });
-    
-    // We can simulate an error by making Broadcaster throw a LedgerError
-    const settleModule = await import("../src/xrpl/settle") as any;
-    const { LedgerError } = await import("../src/xrpl/types");
-    
-    settleModule.Broadcaster.mockImplementationOnce(() => ({
-      send: vi.fn().mockRejectedValue(new LedgerError("tx_failed", "tecUNFUNDED_PAYMENT")),
+    await db.createInvoice(env.DB, { id: "inv_INSUFFICIENT", submitter: "a", raw_r2_key: null, raw_text: "..." });
+    const extracted = { payee_wallet: "rValid", amount: "10000.00", currency: "XRP" as const, confidence: 1 };
+    await db.setStatus(env.DB, "inv_INSUFFICIENT", "pending_approval", { extracted_json: JSON.stringify(extracted) });
+
+    const { XrplRpc } = await import("../src/xrpl/rpc") as any;
+    XrplRpc.mockImplementationOnce(() => ({
+      accountInfo: vi.fn().mockResolvedValue({ Balance: "100" }), // Only 100 drops
     }));
 
     const res = await app.request(
-      "/v1/invoices/inv_SETTLE_FAIL/approve",
+      "/v1/invoices/inv_INSUFFICIENT/approve",
       { method: "POST", body: JSON.stringify({ approver: "admin" }), headers: { "content-type": "application/json" } },
       env,
     );
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.type).toContain("no_rlusd_funds");
+    expect(body.type).toContain("insufficient_funds");
+  });
+
+  it("rejects settlement of unsupported currencies (e.g. RLUSD)", async () => {
+    const env = makeEnv();
+    await db.createInvoice(env.DB, { id: "inv_UNSUPPORTED", submitter: "alice@example.com", raw_r2_key: null, raw_text: "..." });
+    const extracted = { payee_wallet: "rValid", amount: "10.00", currency: "RLUSD", confidence: 1 };
+    await db.setStatus(env.DB, "inv_UNSUPPORTED", "pending_approval", { extracted_json: JSON.stringify(extracted) });
+
+    const res = await app.request(
+      "/v1/invoices/inv_UNSUPPORTED/approve",
+      { method: "POST", body: JSON.stringify({ approver: "admin" }), headers: { "content-type": "application/json" } },
+      env,
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.type).toContain("unsupported_currency");
   });
 });

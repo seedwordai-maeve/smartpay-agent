@@ -96,7 +96,7 @@ invoices.post("/", async (c) => {
           mainnet: "https://xrplcluster.com",
         };
         const rpc = new XrplRpc({ url: rpcUrls[env.XRPL_NETWORK] || rpcUrls.testnet });
-        validation = await validatePayee(rpc, extracted!.payee_wallet, env.RLUSD_ISSUER);
+        validation = await validatePayee(rpc, extracted!.payee_wallet);
       } catch (e) {
         validation.warnings.push(`XRPL validation lookup failed: ${(e as Error).message}`);
       }
@@ -250,7 +250,6 @@ invoices.post("/:id/approve", async (c) => {
       destination,
       amount,
       currency: extracted.currency,
-      rlusdIssuer: env.RLUSD_ISSUER,
       invoiceId: id,
       approver,
     });

@@ -17,36 +17,25 @@ function buildMemos(invoiceId: string, approver: string) {
 
 export async function validatePayee(
   rpc: XrplRpc,
-  address: string,
-  rlusdIssuer: string,
+  address: string
 ): Promise<InvoiceValidation> {
   const warnings: string[] = [];
   let wallet_exists = false;
-  let trustline_present = false;
 
   try {
     const info = await rpc.accountInfo(address);
     wallet_exists = Boolean(info);
-
-    if (wallet_exists) {
-      const lines = await rpc.accountLines(address);
-      trustline_present = lines.some((l) => l.currency === "RLUSD" && l.account === rlusdIssuer);
-      if (!trustline_present) {
-        warnings.push(`No RLUSD trustline to ${rlusdIssuer} — payment will fail with tecPATH_DRY`);
-      }
-    }
   } catch (e) {
     warnings.push(`account_info lookup failed: ${(e as Error).message}`);
   }
 
-  return { wallet_exists, trustline_present, warnings };
+  return { wallet_exists, trustline_present: true, warnings };
 }
 
 interface SubmitArgs {
   destination: string;
   amount: string;
-  currency: "RLUSD" | "XRP";
-  rlusdIssuer: string;
+  currency: string;
   invoiceId: string;
   approver: string;
 }
@@ -56,30 +45,30 @@ export async function submitPayment(
   wallet: Wallet,
   args: SubmitArgs,
 ): Promise<TxFinality> {
-  // Pre-flight trustline and balance checks
-  if (args.currency === "RLUSD") {
-    const lines = await rpc.accountLines(wallet.address);
-    const rlusdLine = lines.find((l) => l.currency === "RLUSD" && l.account === args.rlusdIssuer);
-    if (!rlusdLine) {
-      throw Errors.badRequest("Agent wallet is missing RLUSD trustline. Run scripts/setup-trustline.ts first.", "no_trustline");
-    }
-    const balance = Number(rlusdLine.balance);
-    const required = Number(formatAmount(args.amount));
-    if (balance < required) {
-      throw Errors.badRequest(`Agent wallet lacks RLUSD funds (has ${balance}, needs ${required})`, "no_rlusd_funds");
-    }
+  if (args.currency !== "XRP") {
+    throw Errors.badRequest(`Only XRP settlements are supported in this demo; invoice requested ${args.currency}`, "unsupported_currency");
   }
 
-  const amount =
-    args.currency === "XRP"
-      ? xrpToDrops(formatAmount(args.amount))
-      : {
-          currency: "RLUSD",
-          issuer: args.rlusdIssuer,
-          value: formatAmount(args.amount),
-        };
+  const info = await rpc.accountInfo(wallet.address);
+  if (!info) {
+     throw Errors.badRequest("Agent wallet not found on ledger.", "invalid_wallet");
+  }
+  const xrpBalance = Number(info.Balance); // in drops
+  
+  // Use integer-safe conversion provided by xrpl
+  let requiredDrops: number;
+  try {
+    requiredDrops = Number(xrpToDrops(formatAmount(args.amount)));
+  } catch (e) {
+    throw Errors.badRequest(`Invalid XRP amount: ${args.amount}`, "invalid_amount");
+  }
 
-  // Need SendMax for tokens (transfer rates)
+  if (xrpBalance < requiredDrops + 100) {
+    throw Errors.badRequest(`Agent wallet lacks XRP funds (has ${xrpBalance / 1000000}, needs ${(requiredDrops + 100) / 1000000})`, "insufficient_funds");
+  }
+
+  const amount = String(requiredDrops);
+
   const tx: Record<string, unknown> = {
     TransactionType: "Payment",
     Destination: args.destination,
@@ -87,20 +76,6 @@ export async function submitPayment(
     SourceTag: SOURCE_TAG,
     Memos: buildMemos(args.invoiceId, args.approver),
   };
-
-  if (args.currency === "RLUSD") {
-    // We send exactly `amount` to destination, but issuer might take a transfer fee.
-    // So we authorize up to `amount` + max possible fee (or we can just set SendMax to the exact amount if no fee, 
-    // but the task asks to "build Payment with SendMax for RLUSD issuer").
-    // Actually, setting SendMax isn't strictly necessary unless we are sending *across* trustlines with fees.
-    // "RLUSD needs TransferRate-safe fee ... build Payment with SendMax for RLUSD issuer"
-    // So we use SendMax with a slightly higher value or exactly the same.
-    tx.SendMax = {
-      currency: "RLUSD",
-      issuer: args.rlusdIssuer,
-      value: String(Number(formatAmount(args.amount)) * 1.01), // 1% buffer for transfer rate
-    };
-  }
 
   const broadcaster = new Broadcaster(rpc, { ledgerWindow: 30, pollMs: 2000 });
   
@@ -114,12 +89,6 @@ export async function submitPayment(
     };
   } catch (e) {
     if (e instanceof LedgerError) {
-      if (e.message.includes('tecUNFUNDED_PAYMENT') && args.currency === 'RLUSD') {
-        throw Errors.badRequest("Agent wallet lacks RLUSD funds to complete payment.", "no_rlusd_funds");
-      }
-      if (e.message.includes('tecPATH_DRY') || e.message.includes('tecNO_LINE')) {
-        throw Errors.badRequest("Destination lacks trustline for currency.", "no_trustline_dest");
-      }
       throw Errors.xrplEngine(e.code, e.message);
     }
     throw e;

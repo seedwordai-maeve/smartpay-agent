@@ -14,7 +14,8 @@ export interface ExtractedInvoice {
   payee_name: string
   payee_wallet: string
   amount: string
-  currency: 'RLUSD' | 'XRP'
+  currency: string
+  extraction_warnings?: string[]
   due_date: string
   invoice_number: string
   line_items?: LineItem[]

@@ -23,7 +23,7 @@ Return ONLY a JSON object with exactly these fields:
   "payee_name": string | null,
   "payee_wallet": string (XRPL address starting with "r", 25-35 chars),
   "amount": string (decimal number as string, e.g. "1250.00"),
-  "currency": "RLUSD" | "XRP",
+  "currency": string (The currency explicitly stated in the text, e.g. "XRP", "RLUSD", "USD". If NO currency is stated at all next to the amount, use "UNKNOWN"),
   "due_date": string (ISO date YYYY-MM-DD) | null,
   "invoice_number": string | null,
   "line_items": [{"description": string, "quantity": number, "unit_price": string}] | [],
@@ -110,11 +110,22 @@ export async function extractInvoice(
     throw Errors.extractionFailed(`Extracted wallet "${parsed.payee_wallet}" is not a valid XRPL address shape`);
   }
 
-  if (parsed.currency !== "RLUSD" && parsed.currency !== "XRP") {
-    throw Errors.extractionFailed(`Unsupported currency "${parsed.currency}" — only RLUSD and XRP supported`);
+  
+  if (!parsed.currency) {
+    parsed.currency = "UNKNOWN";
+  }
+
+  let extraction_warnings: string[] = [];
+  if (parsed.currency.toUpperCase() === "UNKNOWN") {
+    parsed.currency = "XRP";
+    parsed.confidence = Math.max(0, (typeof parsed.confidence === "number" ? parsed.confidence : 0.5) - 0.2);
+    extraction_warnings.push("currency not stated — assumed XRP");
+  } else {
+    parsed.currency = parsed.currency.toUpperCase();
   }
 
   return {
+    extraction_warnings,
     payee_name: parsed.payee_name ?? undefined,
     payee_wallet: parsed.payee_wallet,
     amount: parsed.amount,

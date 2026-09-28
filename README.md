@@ -74,7 +74,7 @@ All endpoints are prefixed with the worker origin (see Live URLs above).
 | `POST` | `/v1/invoices/:id/approve` | Approve invoice → triggers XRPL JSON-RPC payment settlement |
 | `POST` | `/v1/invoices/:id/reject` | Reject invoice with `{ "reason": "..." }` |
 | `GET` | `/v1/audit` | Paginated audit log (`?page=1&limit=20`) |
-| `GET` | `/v1/wallet/balance` | Agent wallet XRP + RLUSD balance on XRPL Testnet via JSON-RPC |
+| `GET` | `/v1/wallet/balance` | Agent wallet XRP balance on XRPL Testnet via JSON-RPC |
 
 ---
 
@@ -116,7 +116,6 @@ npx wrangler d1 migrations apply smartpay --remote
 
 ```bash
 npm run setup:wallet          # generates seed, auto-funds via testnet faucet
-npm run setup:trustline       # establishes RLUSD trustline (optional)
 ```
 
 ### 5. Set secrets

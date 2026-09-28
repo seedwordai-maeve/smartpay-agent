@@ -126,20 +126,6 @@ export default function InvoiceReview({ invoice, onSettling, onApprove, onReject
                 )}
                 {invoice.validation.wallet_exists ? 'Wallet verified' : 'Wallet not found'}
               </span>
-              {ext.currency === 'RLUSD' && (
-                <span
-                  className={`flex items-center gap-1 ${
-                    invoice.validation.trustline_present ? 'text-emerald-400' : 'text-amber-400'
-                  }`}
-                >
-                  {invoice.validation.trustline_present ? (
-                    <Check width={11} height={11} />
-                  ) : (
-                    <AlertTriangle width={11} height={11} />
-                  )}
-                  {invoice.validation.trustline_present ? 'RLUSD trustline OK' : 'No RLUSD trustline'}
-                </span>
-              )}
             </div>
           )}
         </div>
@@ -213,9 +199,9 @@ export default function InvoiceReview({ invoice, onSettling, onApprove, onReject
       )}
 
       {/* Warnings */}
-      {invoice.validation && invoice.validation.warnings.length > 0 && (
+      {((invoice.validation?.warnings?.length ?? 0) > 0 || (ext.extraction_warnings?.length ?? 0) > 0) && (
         <div className="mb-6 space-y-2">
-          {invoice.validation.warnings.map((w, i) => (
+          {[...(ext.extraction_warnings || []), ...(invoice.validation?.warnings || [])].map((w, i) => (
             <div
               key={i}
               className="flex items-start gap-2 px-4 py-2.5 rounded-xl bg-amber-500/[0.07] border border-amber-500/15 text-amber-200 text-xs"
@@ -231,7 +217,7 @@ export default function InvoiceReview({ invoice, onSettling, onApprove, onReject
       <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-accent-500/[0.05] border border-accent-500/15 mb-4">
         <ShieldCheck width={16} height={16} className="text-accent-400 flex-shrink-0" />
         <span className="text-xs text-slate-300">
-          Approving will sign and submit a real RLUSD payment on XRPL Testnet. Review carefully.
+          Approving will sign and submit a real XRP payment on XRPL Testnet. Review carefully.
         </span>
       </div>
 
