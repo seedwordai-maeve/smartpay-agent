@@ -56,7 +56,7 @@ Paste a natural-language invoice → AI extracts structured payment details → 
 | **AI** | Cloudflare Workers AI — `@cf/meta/llama-3.1-8b-instruct` (JSON mode) |
 | **Database** | Cloudflare D1 (SQLite) |
 | **Cache / Rate-limit** | Cloudflare KV |
-| **Blockchain** | XRPL Testnet via `xrpl.js` v4 |
+| **Blockchain** | XRPL Testnet via `xrpl.js` (Wallet only) + raw JSON-RPC for reliability |
 | **Protocol** | REST + Server-Sent Events (SSE) for live status updates |
 
 ---
@@ -68,13 +68,13 @@ All endpoints are prefixed with the worker origin (see Live URLs above).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness probe — returns `status: "ok"` |
-| `POST` | `/v1/invoices` | Submit a new invoice (JSON body or `multipart/form-data` with file) |
-| `GET` | `/v1/invoices/:id` | Fetch invoice with AI extraction result and current status |
+| `POST` | `/v1/invoices` | Submit a new invoice (JSON body or `multipart/form-data` with file). Tries AI first, falls back to regex. |
+| `GET` | `/v1/invoices/:id` | Fetch invoice with extraction result and current status |
 | `GET` | `/v1/invoices/:id/events` | SSE stream of status changes (subscribe for live updates) |
-| `POST` | `/v1/invoices/:id/approve` | Approve invoice → triggers XRPL payment settlement |
+| `POST` | `/v1/invoices/:id/approve` | Approve invoice → triggers XRPL JSON-RPC payment settlement |
 | `POST` | `/v1/invoices/:id/reject` | Reject invoice with `{ "reason": "..." }` |
 | `GET` | `/v1/audit` | Paginated audit log (`?page=1&limit=20`) |
-| `GET` | `/v1/wallet/balance` | Agent wallet XRP + RLUSD balance on XRPL Testnet |
+| `GET` | `/v1/wallet/balance` | Agent wallet XRP + RLUSD balance on XRPL Testnet via JSON-RPC |
 
 ---
 
@@ -85,6 +85,7 @@ All endpoints are prefixed with the worker origin (see Live URLs above).
 - **Node.js** 22+ (`node --version`)
 - **Cloudflare account** with Workers free plan
 - `wrangler` CLI — install globally or use the local version via `npx`
+- `jq` (for running the e2e verify script)
 
 ### 1. Clone & install (backend)
 
@@ -143,8 +144,12 @@ npx wrangler pages deploy dist --project-name=smartpay-demo
 
 ### 8. Verify
 
+You can run the end-to-end verification script against the deployed backend, or locally:
+
 ```bash
-curl https://smartpay-api.seedwordai.workers.dev/health
+./scripts/verify-e2e.sh
+# Or against a local wrangler dev server:
+# ./scripts/verify-e2e.sh --local
 ```
 
 ---

@@ -14,38 +14,28 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ── Mock xrpl.js before importing the app ─────────────────────────────────
-// Track which invoice is "in flight" so verify() can resolve for it.
-let inflightInvoiceId: string | null = null;
-
-const fakeClient = {
-  connect: vi.fn(async () => {}),
-  disconnect: vi.fn(async () => {}),
-  request: vi.fn(async (req: { command: string }) => {
-    switch (req.command) {
-      case "account_info":
-        return { result: { account_data: { Balance: "85000000" } } };
-      case "account_lines":
-        return { result: { lines: [{ currency: "RLUSD", account: "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De", balance: "12500.00" }] } };
-      case "tx":
-        // Resolve validated on first poll when we have an inflight id.
-        if (inflightInvoiceId) {
-          return { result: { validated: true, ledger_index: 12345678, meta: { TransactionResult: "tesSUCCESS" } } };
-        }
-        return { result: { validated: false } };
-      default:
-        return { result: {} };
-    }
-  }),
-  autofill: vi.fn(async (tx: unknown) => ({ ...(tx as object), Fee: "12", Sequence: 42, LastLedgerSequence: 12345700 })),
-  submit: vi.fn(async () => ({ result: { engine_result: "tesSUCCESS" } })),
-};
 vi.mock("xrpl", () => ({
-  Client: vi.fn(() => fakeClient),
   Wallet: {
-    fromSeed: vi.fn(() => ({ address: "rAGENT...", seed: "s...", sign: (tx: unknown) => ({ tx_blob: "DEADBEEF", hash: "E6D2FAKE_HASH_0123456789ABCDEF" }) })),
+    fromSeed: vi.fn(() => ({ classicAddress: "rAGENT...", address: "rAGENT...", seed: "s...", sign: (tx: unknown) => ({ tx_blob: "DEADBEEF", hash: "E6D2FAKE_HASH_0123456789ABCDEF" }) })),
   },
   xrpToDrops: (x: string) => String(Math.round(Number(x) * 1_000_000)),
+}));
+
+vi.mock("../src/xrpl/rpc", () => ({
+  XrplRpc: vi.fn().mockImplementation(() => ({
+    accountInfo: vi.fn().mockResolvedValue({ Balance: "85000000" }),
+    accountLines: vi.fn().mockResolvedValue([{ currency: "RLUSD", account: "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De", balance: "12500.00" }]),
+    accountSequence: vi.fn().mockResolvedValue(42),
+    feeDrops: vi.fn().mockResolvedValue(12),
+    validatedLedgerIndex: vi.fn().mockResolvedValue(12345600),
+    call: vi.fn().mockResolvedValue({ engine_result: "tesSUCCESS" }),
+  })),
+}));
+
+vi.mock("../src/xrpl/settle", () => ({
+  Broadcaster: vi.fn().mockImplementation(() => ({
+    send: vi.fn().mockResolvedValue({ hash: "E6D2FAKE_HASH_0123456789ABCDEF", ledgerIndex: 12345678, feeDrops: 12, success: true }),
+  })),
 }));
 
 const { default: app } = await import("../src/worker");
@@ -145,7 +135,6 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   fakeD1 = makeFakeD1();
-  inflightInvoiceId = null;
 });
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -226,8 +215,6 @@ describe("SmartPay Agent API", () => {
       line_items: [],
     };
     await db.setStatus(env.DB, "inv_SEED2", "pending_approval", { extracted_json: JSON.stringify(extracted) });
-    // Tell the fake xrpl client to resolve tx verification for this invoice
-    inflightInvoiceId = "inv_SEED2";
 
     const res = await app.request(
       "/v1/invoices/inv_SEED2/approve",
@@ -247,5 +234,45 @@ describe("SmartPay Agent API", () => {
     const body = await res.json();
     expect(body.status).toBe("ok");
     expect(body.network).toBe("testnet");
+  });
+
+  it("rejects approval if payee wallet was not found on ledger", async () => {
+    const env = makeEnv();
+    await db.createInvoice(env.DB, { id: "inv_INVALID", submitter: "alice@example.com", raw_r2_key: null, raw_text: "..." });
+    const validation = { wallet_exists: false, trustline_present: false, warnings: [] };
+    await db.setStatus(env.DB, "inv_INVALID", "needs_review", { validation_json: JSON.stringify(validation), extracted_json: JSON.stringify({ amount: "10" }) });
+
+    const res = await app.request(
+      "/v1/invoices/inv_INVALID/approve",
+      { method: "POST", body: JSON.stringify({ approver: "admin" }), headers: { "content-type": "application/json" } },
+      env,
+    );
+    expect(res.status).toBe(400); // from Errors.badRequest (invalid_payee)
+    const body = await res.json();
+    expect(body.type).toContain("invalid_payee");
+  });
+
+  it("maps settle errors (e.g. tecUNFUNDED_PAYMENT) to clean problem responses", async () => {
+    const env = makeEnv();
+    await db.createInvoice(env.DB, { id: "inv_SETTLE_FAIL", submitter: "alice@example.com", raw_r2_key: null, raw_text: "..." });
+    const extracted = { payee_wallet: "rValid", amount: "10.00", currency: "RLUSD", confidence: 1 };
+    await db.setStatus(env.DB, "inv_SETTLE_FAIL", "pending_approval", { extracted_json: JSON.stringify(extracted) });
+    
+    // We can simulate an error by making Broadcaster throw a LedgerError
+    const settleModule = await import("../src/xrpl/settle") as any;
+    const { LedgerError } = await import("../src/xrpl/types");
+    
+    settleModule.Broadcaster.mockImplementationOnce(() => ({
+      send: vi.fn().mockRejectedValue(new LedgerError("tx_failed", "tecUNFUNDED_PAYMENT")),
+    }));
+
+    const res = await app.request(
+      "/v1/invoices/inv_SETTLE_FAIL/approve",
+      { method: "POST", body: JSON.stringify({ approver: "admin" }), headers: { "content-type": "application/json" } },
+      env,
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.type).toContain("no_rlusd_funds");
   });
 });
