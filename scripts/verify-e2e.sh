@@ -109,7 +109,7 @@ done
 
 echo "8. Approving negative invoice (expecting unsupported_currency failure)..."
 APPROVE_RES_NEG=$(curl -s -X POST "$API_URL/v1/invoices/$ID_NEG/approve" -H "Content-Type: application/json" -d '{"approver": "e2e-admin"}')
-CODE_NEG=$(echo "$APPROVE_RES_NEG" | jq -r '.code // empty')
+CODE_NEG=$(echo "$APPROVE_RES_NEG" | jq -r '.type // empty | split("/") | last')
 
 if [[ "$CODE_NEG" == "unsupported_currency" ]]; then
   echo "SUCCESS! Negative test passed. Received expected code: $CODE_NEG"
