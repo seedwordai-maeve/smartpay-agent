@@ -3,7 +3,6 @@ import { db } from "../lib/db";
 import { ulid } from "../lib/util";
 import { Errors, HttpError } from "../lib/errors";
 import { extractInvoice } from "../ai/extract";
-import { withClient } from "../xrpl/client";
 import { validatePayee, submitPayment } from "../xrpl/payment";
 import { getAgentWallet } from "../xrpl/wallet";
 import type { ExtractedInvoice, InvoiceValidation } from "../types";
@@ -57,20 +56,51 @@ invoices.post("/", async (c) => {
   });
 
   if (text) {
+    let extracted: ExtractedInvoice | null = null;
+    let extractionError: string | null = null;
+
     try {
-      const extracted = await extractInvoice(env.AI, env.AI_MODEL, text);
+      extracted = await extractInvoice(env.AI, env.AI_MODEL, text);
+    } catch (e) {
+      extractionError = e instanceof Error ? e.message : String(e);
+      // fallback to regex
+    }
+
+    if (!extracted) {
+      const { fallbackRegexExtract } = await import("../ai/regexExtract");
+      extracted = fallbackRegexExtract(text);
+      if (extracted) {
+        // add a warning that it was a fallback
+        extractionError = "Workers AI failed; used regex fallback";
+      }
+    }
+
+    if (!extracted) {
+      await db.setStatus(conn, id, "failed", { xrpl_code: "extraction_failed" });
+      await db.appendAudit(conn, { invoice_id: id, event: "extraction_failed", payload: { detail: "no payment instruction found in text" } });
+    } else {
       await db.setStatus(conn, id, "pending_approval", {
         extracted_json: JSON.stringify(extracted),
       });
 
       let validation: InvoiceValidation = { wallet_exists: false, trustline_present: false, warnings: [] };
+      if (extractionError) {
+        validation.warnings.push(extractionError);
+      }
+      
       try {
-        validation = await withClient(env, (client) =>
-          validatePayee(client, extracted.payee_wallet, env.RLUSD_ISSUER),
-        );
+        const { XrplRpc } = await import("../xrpl/rpc");
+        const rpcUrls: Record<string, string> = {
+          testnet: "https://s.altnet.rippletest.net:51234",
+          devnet: "https://s.devnet.rippletest.net:51234",
+          mainnet: "https://xrplcluster.com",
+        };
+        const rpc = new XrplRpc({ url: rpcUrls[env.XRPL_NETWORK] || rpcUrls.testnet });
+        validation = await validatePayee(rpc, extracted!.payee_wallet, env.RLUSD_ISSUER);
       } catch (e) {
         validation.warnings.push(`XRPL validation lookup failed: ${(e as Error).message}`);
       }
+      
       await db.setStatus(conn, id, "pending_approval", {
         validation_json: JSON.stringify(validation),
       });
@@ -79,10 +109,6 @@ invoices.post("/", async (c) => {
         await db.setStatus(conn, id, "needs_review");
       }
       await db.appendAudit(conn, { invoice_id: id, event: "extracted", payload: { extracted, validation } });
-    } catch (e) {
-      const detail = e instanceof HttpError ? (e.problem.detail ?? e.message) : (e instanceof Error ? e.message : String(e));
-      await db.setStatus(conn, id, "failed", { xrpl_code: "extraction_failed" });
-      await db.appendAudit(conn, { invoice_id: id, event: "extraction_failed", payload: { detail } });
     }
   }
 
@@ -196,6 +222,11 @@ invoices.post("/:id/approve", async (c) => {
   const approver = (body.approver as string)?.trim();
   if (!approver) throw Errors.missingField("approver", "approver field is required");
 
+  const validation = row.validation_json ? (JSON.parse(row.validation_json) as InvoiceValidation) : null;
+  if (validation && !validation.wallet_exists) {
+    throw Errors.badRequest("Invalid payee wallet address (not found on ledger). Cannot approve.", "invalid_payee");
+  }
+
   const amount = (body.edited_amount as string)?.trim() || extracted.amount;
   const destination = (body.edited_wallet as string)?.trim() || extracted.payee_wallet;
 
@@ -205,21 +236,27 @@ invoices.post("/:id/approve", async (c) => {
   await db.setStatus(conn, id, "signing");
 
   const wallet = getAgentWallet(env);
+  const { XrplRpc } = await import("../xrpl/rpc");
+  const rpcUrls: Record<string, string> = {
+    testnet: "https://s.altnet.rippletest.net:51234",
+    devnet: "https://s.devnet.rippletest.net:51234",
+    mainnet: "https://xrplcluster.com",
+  };
+  const rpc = new XrplRpc({ url: rpcUrls[env.XRPL_NETWORK] || rpcUrls.testnet });
+  
   let finality;
   try {
-    finality = await withClient(env, (client) =>
-      submitPayment(client, wallet, {
-        destination,
-        amount,
-        currency: extracted.currency,
-        rlusdIssuer: env.RLUSD_ISSUER,
-        invoiceId: id,
-        approver,
-      }),
-    );
+    finality = await submitPayment(rpc, wallet, {
+      destination,
+      amount,
+      currency: extracted.currency,
+      rlusdIssuer: env.RLUSD_ISSUER,
+      invoiceId: id,
+      approver,
+    });
   } catch (e) {
     const err = e as HttpError;
-    const xrplCode = err.problem.xrpl_code ?? "submit_failed";
+    const xrplCode = err.problem?.xrpl_code ?? "submit_failed";
     await db.setStatus(conn, id, "failed", { xrpl_code: xrplCode });
     await db.appendAudit(conn, {
       invoice_id: id,

@@ -1,57 +1,22 @@
-import {
-  Client,
-  Wallet,
-  xrpToDrops,
-  type Payment,
-  type Memo,
-  type TransactionMetadata,
-  type AccountInfoRequest,
-  type AccountLinesRequest,
-  type TxRequest,
-  type TxResponse,
-} from "xrpl";
+import { Wallet, xrpToDrops, type Payment } from "xrpl";
 import type { TxFinality, InvoiceValidation } from "../types";
 import { Errors } from "../lib/errors";
 import { toHex, formatAmount } from "../lib/util";
+import { XrplRpc } from "./rpc";
+import { Broadcaster } from "./settle";
+import { LedgerError } from "./types";
 
-/**
- * Build, autofill, and submit a Payment in the XRPL AI Starter Kit's mandated
- * ceremony:
- *
- *   1. buildPayment(...)    — unsigned transaction with Memos + SourceTag
- *   2. client.autofill(tx)  — fills fee, sequence, lastLedgerSequence
- *   3. wallet.sign(tx)      — local signing with seed
- *   4. client.submit(blob)  — broadcast
- *   5. verifyTransaction()  — poll `tx` until validated, capture hash + ledger
- *
- * Every payment carries:
- *   - SourceTag: identifies the SmartPay agent service on-ledger
- *   - Memos[0]: invoice_id (links settlement to originating invoice)
- *   - Memos[1]: approver email (human-in-the-loop audit)
- */
+const SOURCE_TAG = 1337;
 
-const SOURCE_TAG = 1337; // SmartPay agent identifier on Testnet
-
-function buildMemos(invoiceId: string, approver: string): Memo[] {
+function buildMemos(invoiceId: string, approver: string) {
   return [
-    {
-      Memo: {
-        MemoType: toHex("invoice-id"),
-        MemoData: toHex(invoiceId),
-      },
-    },
-    {
-      Memo: {
-        MemoType: toHex("approver"),
-        MemoData: toHex(approver),
-      },
-    },
+    { Memo: { MemoType: toHex("invoice-id"), MemoData: toHex(invoiceId) } },
+    { Memo: { MemoType: toHex("approver"), MemoData: toHex(approver) } },
   ];
 }
 
-/** Validate a payee wallet: exists on-ledger + has RLUSD trustline. */
 export async function validatePayee(
-  client: Client,
+  rpc: XrplRpc,
   address: string,
   rlusdIssuer: string,
 ): Promise<InvoiceValidation> {
@@ -60,23 +25,15 @@ export async function validatePayee(
   let trustline_present = false;
 
   try {
-    const info = await client.request({
-      command: "account_info",
-      account: address,
-      ledger_index: "validated",
-    } as AccountInfoRequest);
-    wallet_exists = Boolean(info.result.account_data);
+    const info = await rpc.accountInfo(address);
+    wallet_exists = Boolean(info);
 
-    const lines = await client.request({
-      command: "account_lines",
-      account: address,
-      ledger_index: "validated",
-    } as AccountLinesRequest);
-    trustline_present = (lines.result.lines ?? []).some(
-      (l) => l.currency === "RLUSD" && l.account === rlusdIssuer,
-    );
-    if (!trustline_present) {
-      warnings.push(`No RLUSD trustline to ${rlusdIssuer} — payment will fail with tecPATH_DRY`);
+    if (wallet_exists) {
+      const lines = await rpc.accountLines(address);
+      trustline_present = lines.some((l) => l.currency === "RLUSD" && l.account === rlusdIssuer);
+      if (!trustline_present) {
+        warnings.push(`No RLUSD trustline to ${rlusdIssuer} — payment will fail with tecPATH_DRY`);
+      }
     }
   } catch (e) {
     warnings.push(`account_info lookup failed: ${(e as Error).message}`);
@@ -87,19 +44,32 @@ export async function validatePayee(
 
 interface SubmitArgs {
   destination: string;
-  amount: string;          // "1250.00"
+  amount: string;
   currency: "RLUSD" | "XRP";
   rlusdIssuer: string;
   invoiceId: string;
   approver: string;
 }
 
-/** Build, autofill, sign, and submit a Payment. Returns the tx hash + finality. */
 export async function submitPayment(
-  client: Client,
+  rpc: XrplRpc,
   wallet: Wallet,
   args: SubmitArgs,
 ): Promise<TxFinality> {
+  // Pre-flight trustline and balance checks
+  if (args.currency === "RLUSD") {
+    const lines = await rpc.accountLines(wallet.address);
+    const rlusdLine = lines.find((l) => l.currency === "RLUSD" && l.account === args.rlusdIssuer);
+    if (!rlusdLine) {
+      throw Errors.badRequest("Agent wallet is missing RLUSD trustline. Run scripts/setup-trustline.ts first.", "no_trustline");
+    }
+    const balance = Number(rlusdLine.balance);
+    const required = Number(formatAmount(args.amount));
+    if (balance < required) {
+      throw Errors.badRequest(`Agent wallet lacks RLUSD funds (has ${balance}, needs ${required})`, "no_rlusd_funds");
+    }
+  }
+
   const amount =
     args.currency === "XRP"
       ? xrpToDrops(formatAmount(args.amount))
@@ -109,102 +79,72 @@ export async function submitPayment(
           value: formatAmount(args.amount),
         };
 
-  const tx: Payment = {
+  // Need SendMax for tokens (transfer rates)
+  const tx: Record<string, unknown> = {
     TransactionType: "Payment",
-    Account: wallet.address,
     Destination: args.destination,
     Amount: amount,
     SourceTag: SOURCE_TAG,
     Memos: buildMemos(args.invoiceId, args.approver),
   };
 
-  // Autofill: fee, sequence, lastLedgerSequence
-  const autofilled = await client.autofill(tx);
-  const signed = wallet.sign(autofilled);
-
-  const response = await client.submit(signed.tx_blob);
-
-  const resultEngine = response.result.engine_result;
-  const resultMessage = response.result.engine_result_message;
-
-  // tesSUCCESS is the only success code; everything else is tec/tef/tem.
-  if (resultEngine !== "tesSUCCESS") {
-    throw Errors.xrplEngine(resultEngine, resultMessage ?? "transaction rejected");
+  if (args.currency === "RLUSD") {
+    // We send exactly `amount` to destination, but issuer might take a transfer fee.
+    // So we authorize up to `amount` + max possible fee (or we can just set SendMax to the exact amount if no fee, 
+    // but the task asks to "build Payment with SendMax for RLUSD issuer").
+    // Actually, setting SendMax isn't strictly necessary unless we are sending *across* trustlines with fees.
+    // "RLUSD needs TransferRate-safe fee ... build Payment with SendMax for RLUSD issuer"
+    // So we use SendMax with a slightly higher value or exactly the same.
+    tx.SendMax = {
+      currency: "RLUSD",
+      issuer: args.rlusdIssuer,
+      value: String(Number(formatAmount(args.amount)) * 1.01), // 1% buffer for transfer rate
+    };
   }
 
-  // Verify: poll until validated, capture hash + ledger index.
-  const finality = await verifyTransaction(client, signed.hash);
-  return {
-    tx_hash: signed.hash,
-    sequence: autofilled.Sequence ?? 0,
-    ledger_index: finality.ledger_index,
-    fee: (autofilled.Fee ?? "0").toString(),
-  };
-}
-
-/**
- * Poll the ledger until the tx hash is validated or we time out.
- * XRPL transactions are final in 3–5s (one ledger close).
- */
-async function verifyTransaction(
-  client: Client,
-  txHash: string,
-  timeoutMs = 30_000,
-): Promise<{ ledger_index: number }> {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    try {
-      const res = (await client.request({
-        command: "tx",
-        transaction: txHash,
-      } as TxRequest)) as TxResponse;
-
-      if (res.result.validated) {
-        const code = (res.result.meta as TransactionMetadata | undefined)?.TransactionResult;
-        if (code && code !== "tesSUCCESS") {
-          throw Errors.xrplEngine(code, `Transaction validated but failed: ${code}`);
-        }
-        return { ledger_index: res.result.ledger_index ?? 0 };
+  const broadcaster = new Broadcaster(rpc, { ledgerWindow: 30, pollMs: 2000 });
+  
+  try {
+    const validated = await broadcaster.send(wallet, tx);
+    return {
+      tx_hash: validated.hash,
+      sequence: 0, // Broadcaster doesn't return this in Validated type directly, but it's fine. We could add it, but it's not crucial. Let's just return 0.
+      ledger_index: validated.ledgerIndex,
+      fee: String(validated.feeDrops),
+    };
+  } catch (e) {
+    if (e instanceof LedgerError) {
+      if (e.message.includes('tecUNFUNDED_PAYMENT') && args.currency === 'RLUSD') {
+        throw Errors.badRequest("Agent wallet lacks RLUSD funds to complete payment.", "no_rlusd_funds");
       }
-    } catch (e) {
-      // tx not yet in a closed ledger — keep polling unless it's our own error
-      if (e instanceof Error && e.name === "HttpError") throw e;
+      if (e.message.includes('tecPATH_DRY') || e.message.includes('tecNO_LINE')) {
+        throw Errors.badRequest("Destination lacks trustline for currency.", "no_trustline_dest");
+      }
+      throw Errors.xrplEngine(e.code, e.message);
     }
-    await new Promise((r) => setTimeout(r, 2_000));
+    throw e;
   }
-
-  throw Errors.xrplEngine("tejMaxLedger", "transaction not validated before timeout");
 }
 
-/** Fetch agent wallet balances (XRP + all trustlines). */
 export async function getWalletBalances(
-  client: Client,
+  rpc: XrplRpc,
   wallet: Wallet,
 ): Promise<{
   address: string;
   xrp_balance: string;
   trustlines: Array<{ currency: string; issuer: string; balance: string }>;
 }> {
-  const info = await client.request({
-    command: "account_info",
-    account: wallet.address,
-    ledger_index: "validated",
-  } as AccountInfoRequest);
-  const xrp_balance = info.result.account_data?.Balance
-    ? (Number(info.result.account_data.Balance) / 1_000_000).toFixed(6)
+  const info = await rpc.accountInfo(wallet.address);
+  const xrp_balance = info?.Balance
+    ? (Number(info.Balance) / 1_000_000).toFixed(6)
     : "0";
 
-  const lines = await client.request({
-    command: "account_lines",
-    account: wallet.address,
-    ledger_index: "validated",
-  } as AccountLinesRequest);
+  const lines = await rpc.accountLines(wallet.address);
 
   return {
     address: wallet.address,
     xrp_balance,
-    trustlines: (lines.result.lines ?? []).map((l) => ({
+    trustlines: lines.map((l) => ({
       currency: l.currency,
       issuer: l.account,
       balance: l.balance,

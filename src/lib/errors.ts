@@ -92,4 +92,11 @@ export const Errors = {
       detail,
       { xrpl_code: code },
     ),
+  badRequest: (detail: string, code: string) =>
+    bad(
+      `https://smartpay/errors/${code}`,
+      "Bad request",
+      400,
+      detail,
+    ),
 };

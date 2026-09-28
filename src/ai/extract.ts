@@ -50,27 +50,41 @@ export async function extractInvoice(
 ): Promise<ExtractedInvoice> {
   const trimmed = rawText.trim().slice(0, 12_000); // cap input tokens
 
-  let result: WorkersAIResponse;
-  try {
-    result = await ai.run<WorkersAIResponse>(model, {
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: trimmed },
-      ],
-      temperature: 0,
-      max_tokens: 1024,
-    });
-  } catch (e) {
-    throw Errors.extractionFailed(
-      `Workers AI request failed: ${(e as Error).message ?? String(e)}`,
-    );
+  let result: WorkersAIResponse | undefined;
+  let text = "";
+  
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const prompt = attempt === 1 
+        ? SYSTEM_PROMPT 
+        : SYSTEM_PROMPT + "\n\nCRITICAL: You failed to follow instructions previously. You MUST respond with ONLY a valid JSON object. No explanation, no markdown blocks.";
+        
+      result = await ai.run<WorkersAIResponse>(model, {
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: trimmed },
+        ],
+        temperature: 0,
+        max_tokens: 1024,
+      });
+      text = result?.response ?? "";
+      
+      if (text) {
+        break; // Success
+      } else {
+        console.warn(`[AI Extract] Attempt ${attempt} returned empty response. Raw result:`, JSON.stringify(result).slice(0, 400));
+      }
+    } catch (e) {
+      console.warn(`[AI Extract] Attempt ${attempt} failed:`, (e as Error).message ?? String(e));
+      if (attempt === 2) {
+        throw Errors.extractionFailed(`Workers AI request failed: ${(e as Error).message ?? String(e)}`);
+      }
+    }
   }
 
-  const text = result?.response ?? "";
   if (!text) {
-    // Dump the raw result so the operator can debug AI Gateway / auth issues
     throw Errors.extractionFailed(
-      `Workers AI returned no response text. Raw result: ${JSON.stringify(result).slice(0, 400)}`,
+      `Workers AI returned no response text after 2 attempts. Raw result: ${JSON.stringify(result).slice(0, 400)}`,
     );
   }
 
@@ -79,7 +93,8 @@ export async function extractInvoice(
     // Strip markdown code fences if present (some models wrap JSON in ```json)
     const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
     parsed = JSON.parse(cleaned);
-  } catch {
+  } catch (e) {
+    console.warn("[AI Extract] Non-JSON output:", text);
     throw Errors.extractionFailed(`Workers AI returned non-JSON output: ${text.slice(0, 200)}`);
   }
 
